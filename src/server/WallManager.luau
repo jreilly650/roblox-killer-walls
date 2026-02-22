@@ -5,7 +5,17 @@ local Players = game:GetService("Players")
 local Shared = ReplicatedStorage:WaitForChild("Shared")
 local GameConfig = require(Shared:WaitForChild("GameConfig"))
 
-local function init()
+local WallManager = {}
+
+function WallManager.calculateDeathChance(wallIndex, startingChance, chanceIncrement)
+	return startingChance + (wallIndex - 1) * chanceIncrement
+end
+
+function WallManager.shouldDie(roll, deathChance)
+	return roll < deathChance
+end
+
+function WallManager.init()
 	print("Killer Walls initializing...")
 	
 	-- 1. Create Folders
@@ -88,7 +98,7 @@ local function init()
 		wall.Material = Enum.Material.Neon
 		wall.Parent = wallsFolder
 		
-		local deathChance = GameConfig.STARTING_DEATH_CHANCE + (i - 1) * GameConfig.CHANCE_INCREMENT
+		local deathChance = WallManager.calculateDeathChance(i, GameConfig.STARTING_DEATH_CHANCE, GameConfig.CHANCE_INCREMENT)
 		
 		-- Checkpoint (placed halfway between this wall and the next)
 		if i < GameConfig.WALL_COUNT then
@@ -113,6 +123,12 @@ local function init()
 					local currentCP = playerCheckpoints[player] or 0
 					if i > currentCP then
 						playerCheckpoints[player] = i
+						
+						local leaderstats = player:FindFirstChild("leaderstats")
+						if leaderstats and leaderstats:FindFirstChild("Level") then
+							leaderstats.Level.Value = i
+						end
+						
 						print("[KILLER-WALLS] " .. player.Name .. " reached Checkpoint " .. i)
 					end
 				end
@@ -133,7 +149,7 @@ local function init()
 				print(string.format("[KILLER-WALLS] Player %s crossing Wall %d. Chance: %.1f%%, Roll: %.1f%%", 
 					player.Name, i, deathChance * 100, roll * 100))
 					
-				if roll < deathChance then
+				if WallManager.shouldDie(roll, deathChance) then
 					local humanoid = character:FindFirstChild("Humanoid")
 					if humanoid then
 						humanoid.Health = 0
@@ -166,14 +182,43 @@ local function init()
 		local character = hit.Parent
 		local player = Players:GetPlayerFromCharacter(character)
 		if player then
+			-- Prevent multiple wins in a single touch/life
+			local currentCP = playerCheckpoints[player] or 0
+			if currentCP == -1 then return end 
+			
 			print("[KILLER-WALLS] Player " .. player.Name .. " HAS WON!")
+			
+			local leaderstats = player:FindFirstChild("leaderstats")
+			if leaderstats and leaderstats:FindFirstChild("Wins") then
+				leaderstats.Wins.Value += 1
+			end
+			
 			-- Reset their checkpoint so they can play again if they die or respawn
+			playerCheckpoints[player] = -1
+			if leaderstats and leaderstats:FindFirstChild("Level") then
+				leaderstats.Level.Value = 0
+			end
+			task.wait(1)
 			playerCheckpoints[player] = 0
 		end
 	end)
 	
 	-- 5. Manage Respawns & Orientation
 	Players.PlayerAdded:Connect(function(player)
+		local leaderstats = Instance.new("Folder")
+		leaderstats.Name = "leaderstats"
+		leaderstats.Parent = player
+		
+		local levelStat = Instance.new("IntValue")
+		levelStat.Name = "Level"
+		levelStat.Value = 0
+		levelStat.Parent = leaderstats
+		
+		local winsStat = Instance.new("IntValue")
+		winsStat.Name = "Wins"
+		winsStat.Value = 0
+		winsStat.Parent = leaderstats
+
 		playerCheckpoints[player] = 0 -- Default to 0 (start)
 		
 		player.CharacterAdded:Connect(function(character)
@@ -213,4 +258,4 @@ local function init()
 	Lighting.FogColor = Color3.fromRGB(20, 20, 20)
 end
 
-return { init = init }
+return WallManager
